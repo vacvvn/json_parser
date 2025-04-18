@@ -1,5 +1,6 @@
 *.o
 *.tmp
 *.bak
+*.cfg
 json_parser
 build/

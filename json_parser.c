@@ -11,9 +11,9 @@
 
 
 
-#define ETHERNET_MODE 	0
-#define MA159_MODE 	1
-#define GREK_FCRT 	0
+// #define ETHERNET_MODE 	0
+// #define MA159_MODE 	0
+// #define GREK_FCRT 	1
 
 // Коды возвратов
 #define SUCCESS					0		// Успешное завершение
@@ -80,6 +80,7 @@ typedef struct
 // Структура описания ВК регулярного сообщения
 typedef struct
 {
+    char comment[128];
     char type;
     uint32_t dst_id;
 #ifdef GREK_FCRT
@@ -106,6 +107,7 @@ typedef struct
 // Структура описания ВК периодического сообщения
 typedef struct
 {
+    char comment[128];
     char type;
 #ifndef GREK_FCRT
     uint32_t dst_id;
@@ -843,7 +845,7 @@ int json_parse (const char *input, json_value *result)
 
 
 
-int process_json_fcrt_settings_file (const char *file_path)
+int process_json_fcrt_settings_file (const char *file_path, const char *dest_path)
 {
     int error_counter = 0;
 #ifdef ETHERNET_MODE
@@ -852,6 +854,7 @@ int process_json_fcrt_settings_file (const char *file_path)
     ethernet_settings.regular_overall_count = 0;
     ethernet_settings.periodical_state = VC_OFF;
 #else
+    fc_settings_t fcrt_settings;
     fcrt_settings.regular_enabled_count = 0;
     fcrt_settings.regular_overall_count = 0;
     fcrt_settings.periodical_state = VC_OFF;
@@ -1054,7 +1057,7 @@ int process_json_fcrt_settings_file (const char *file_path)
                                                 else
                                                 {
                                                     fcrt_settings.vc_regular_array[i].enabled = VC_OFF;
-                                                    continue;
+                                                    // continue;
                                                 }
                                             }
                                             else
@@ -1062,6 +1065,19 @@ int process_json_fcrt_settings_file (const char *file_path)
                                                 fcrt_settings.vc_regular_array[i].enabled = VC_OFF;
                                                 continue;
                                             }
+                                            //копируем комментарий
+                                            value = json_value_with_key(regular_vc, "comment");
+                                            if (value != NULL)
+                                            {
+                                                char *comment = json_value_to_string(value);
+                                                snprintf(fcrt_settings.vc_regular_array[i].comment, sizeof(fcrt_settings.vc_regular_array[i].comment), "\n# %s\n", comment);
+                                            }
+                                            else
+                                            {
+                                                fcrt_settings.vc_regular_array[i].enabled = VC_OFF;
+                                                continue;
+                                            }
+
 
                                             // Проверка типа ВК
                                             value = json_value_with_key(regular_vc, "type");
@@ -1429,6 +1445,13 @@ int process_json_fcrt_settings_file (const char *file_path)
                                         {
                                             fcrt_settings.periodical_state = VC_ON;
 #ifndef GREK_FCRT
+                                            //копируем комментарий
+                                            value = json_value_with_key(periodical_vc, "comment");
+                                            if (value != NULL)
+                                            {
+                                                char *comment = json_value_to_string(value);
+                                                snprintf(fcrt_settings.vc_periodical_array.comment, sizeof(fcrt_settings.vc_periodical_array.comment), "\n# %s\n", comment);
+                                            }
                                             // Проверка DST_ID
                                             value = json_value_with_key(periodical_vc, "dst_id");
 
@@ -1675,26 +1698,86 @@ int process_json_fcrt_settings_file (const char *file_path)
     {
         return DEF_ERROR;
     }
+    ///пишем данные в файл cfg
+    int cfg_fd = open(dest_path, O_CREAT | O_TRUNC | O_RDWR, S_IRWXU | S_IRWXG | S_IRWXO);
+    if(cfg_fd > 0)
+    {
+        int i;
+        #define BUFSZ 256
+        char buf[BUFSZ];
+        vc_regular_data_t * rd = NULL;
+        vc_periodical_data_t * pd = NULL;
+        rd = fcrt_settings.vc_regular_array;
+        pd = &fcrt_settings.vc_periodical_array;
+        ///обычные сообщения
+        for(i = 0; i < fcrt_settings.regular_overall_count; i++)
+        {
+            snprintf(buf, BUFSZ, "%c=%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
+            rd->type,
+            rd->dst_id, rd->src_id,
+            rd->input_port, rd->output_port,
+            rd->priority,
+            rd->input_asm_id,rd->output_asm_id,
+            rd->max_size,
+            rd->input_queue, rd->output_queue,
+            rd->duplication,
+            rd->channel_type,
+            rd->timeout_AB
+            );
+#if 0
+            printf("%s", buf);
+#endif
+            write(cfg_fd, rd->comment, strlen(rd->comment));
+            if(rd->enabled == VC_OFF)
+                write(cfg_fd, "#", strlen("#"));
 
+            write(cfg_fd, buf, strlen(buf));
+            rd++;
+        }
+        ///статусное сообщение
+        snprintf(buf, BUFSZ, "P=%u,%u,%u,%u,%u,%u,%u,%u\n",
+        pd->dst_id, pd->src_id,
+        pd->output_port,
+        pd->period,
+        pd->output_asm_id,
+        pd->max_size,
+        pd->duplication,
+        pd->priority
+        );
+
+#if 0
+        printf("%s", buf);
+#endif
+        write(cfg_fd, pd->comment, strlen(pd->comment));
+        write(cfg_fd, buf, strlen(buf));
+        close(cfg_fd);
+    }
+    else
+        printf("\nError: could not open file\n");
+    free(fcrt_settings.vc_regular_array);
+    
     return SUCCESS;
 }
 
 char help_str[] = {
-    "json_parser <path to json file> \n"
+    "Using:\n\tjson_parser <path to json file> <path to converted cfg file>\n"
 };
 
 int main(int argc, char * argv[])
 {
     char * json_cnf_path;
-    if(argc != 2)
+    char * cfg_cnf_path;
+    if(argc != 3)
     {
         printf("%s", help_str);
         return -EINVAL;
     }
     json_cnf_path = argv[1];
-    if(process_json_fcrt_settings_file(json_cnf_path) != SUCCESS)
+    cfg_cnf_path = argv[2];
+
+    if(process_json_fcrt_settings_file(json_cnf_path, cfg_cnf_path) != SUCCESS)
     {
-        printf("\n---- Error. Could not parse json config file %s", json_cnf_path);
+        printf("\n---- Error. Could not convert json config file %s to %s file", json_cnf_path, cfg_cnf_path);
         return -EINVAL;
     }
     return 0;
