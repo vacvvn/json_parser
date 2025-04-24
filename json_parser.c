@@ -1710,7 +1710,7 @@ int process_json_fcrt_settings_file (const char *file_path, const char *dest_pat
         rd = fcrt_settings.vc_regular_array;
         pd = &fcrt_settings.vc_periodical_array;
         ///обычные сообщения
-        for(i = 0; i < fcrt_settings.regular_overall_count; i++)
+        for(i = 0; i < fcrt_settings.regular_overall_count; i++, rd++)
         {
             snprintf(buf, BUFSZ, "%c=%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
             rd->type,
@@ -1732,7 +1732,6 @@ int process_json_fcrt_settings_file (const char *file_path, const char *dest_pat
                 write(cfg_fd, "#", strlen("#"));
 
             write(cfg_fd, buf, strlen(buf));
-            rd++;
         }
         ///статусное сообщение
         snprintf(buf, BUFSZ, "P=%u,%u,%u,%u,%u,%u,%u,%u\n",
